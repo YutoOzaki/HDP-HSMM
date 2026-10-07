@@ -83,10 +83,7 @@ for(cntsampling in 1:numsampling) {
   ## embedded HMM message passing ##
   lnB = matrix(0, nrow=T, ncol=N)
   lnBlik = matrix(0, nrow=T, ncol=N)
-  
   lnBbar = sapply(1:N, function(i){matrix(0, nrow=T, ncol=r_pos[i])})
-  for(i in 1:N) lnBbar[[i]][T, ] = 0
-  
   lnc = sapply(1:N, function(i){dbinom((r_pos[i] - 1):0, r_pos[i] - 1, p_pos[i], log=TRUE)})
   lnAbar = log(Abar)
   lnp_pos = log(p_pos)
