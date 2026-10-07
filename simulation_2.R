@@ -185,7 +185,7 @@ for(cntsampling in 1:numsampling) {
   x_pos_seq[, cntsampling] = unlist(sapply(1:(s-1), function(i){rep(z_pos[i], d_pos[i])}))
   
   ## sampling mu, tau, r, p, and A
-  z_pos_set = unique(z_pos[1:(length(z_pos) - 1)]) # duration of censoring term is not identifiable so remove it
+  z_pos_set = unique(z_pos)
   n_z = matrix(0, nrow=N, ncol=N)
   for(i in 1:N) {
     if(i %in% z_pos_set) {
@@ -204,25 +204,29 @@ for(cntsampling in 1:numsampling) {
       theta_pos[i, ] = c(mu_pos[i], 1/sqrt(tau_pos[i]))
       
       ## posterior draws of r and p
-      idx_i = z_pos == i
+      idx_i = z_pos ==i & (!d_cens) # duration of censoring term is not identifiable so remove it
       D = sum(idx_i)
-      d_pos_i = d_pos[idx_i]
-      u_n = u + sum(d_pos_i)
-      
-      lnp_r = vector(mode="numeric", length=rmax)
-      for(r in 1:rmax) {
-        lnp_r[r] = 
-          log(nu[r]) + 
-          sum(sapply(1:D, function(k){lchoose(d_pos_i[k] + r - 2, d_pos_i[k] - 1)})) +
-          lbeta(u_n, v + r*D)
-      }
-      lnC = max(lnp_r)
-      p_r = exp(lnp_r - lnC)/sum(exp(lnp_r - lnC))
-      r_pos[i] = sample(1:rmax, size=1, replace=TRUE, prob=p_r)
-      
-      v_n = v + r_pos[i]*D   # n_s is reduced because duration is interpreted as the number of trials + 1
-      p_pos[i] = rbeta(1, u_n, v_n)
-      
+      if(D == 0) { # censored state case
+        r_pos[i] =  sample(1:rmax, size=1, replace=TRUE, nu)
+        p_pos[i]   = rbeta(1, u, v)
+      } else {
+        d_pos_i = d_pos[idx_i]
+        u_n = u + sum(d_pos_i - 1)
+        
+        lnp_r = vector(mode="numeric", length=rmax)
+        for(r in 1:rmax) {
+          lnp_r[r] = 
+            log(nu[r]) + 
+            sum(sapply(1:D, function(k){lchoose(d_pos_i[k] + r - 2, d_pos_i[k] - 1)})) +
+            lbeta(u_n, v + r*D)
+        }
+        lnC = max(lnp_r)
+        p_r = exp(lnp_r - lnC)/sum(exp(lnp_r - lnC))
+        r_pos[i] = sample(1:rmax, size=1, replace=TRUE, prob=p_r)
+        
+        v_n = v + r_pos[i]*D   # n_s is reduced because duration is interpreted as the number of trials + 1
+        p_pos[i] = rbeta(1, u_n, v_n)
+      } 
       ## posterior draws of A
       j = z_pos[which(z_pos == i) + 1]
       if(length(j) == 1 && is.na(j)) {
@@ -230,15 +234,17 @@ for(cntsampling in 1:numsampling) {
       } else {
         for(l in 1:length(j)) n_z[i, j[l]] = n_z[i, j[l]] + 1
         n_zi = n_z[i, ]
-        rho = rgeom(length(j), min(1, A[i, i] + 1e-15)) # to avoid 0 due to underflow
+        rho = rgeom(length(j), min(1, 1 - A[i, i] + 1e-15)) # to avoid 0 due to underflow
         n_zi[i] = n_zi[i] + sum(rho)
         A[i, ] = rdirichlet(1, alp*bet_pos + n_zi)
+        #n_z[i, i] = n_z[i, i] + n_zi[i] # self-transition counts are used in sampling of beta
       }
     } else {
       # redraw from prior
       tau_pos[i] = rgamma(1, shape=a, rate=b)
       mu_pos[i]  = rnorm(1, m, 1/sqrt(kap*tau_pos[i]))
       theta_pos[i, ] = c(mu_pos[i], 1/sqrt(tau_pos[i]))
+      r_pos[i] =  sample(1:rmax, size=1, replace=TRUE, nu)
       p_pos[i]   = rbeta(1, u, v)
       A[i, ] = rdirichlet(1, alp*bet_pos)
     }
