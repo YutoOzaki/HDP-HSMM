@@ -22,11 +22,11 @@ kap = 0.5
 
 u = 1
 v = 1
-rmax = 10
+rmax = 15
 nu = rep(1, rmax)/rmax
 
 ## Logarithm of the Stirling numbers of the first kind
-lnstrl = matrix(-Inf, nrow=500, ncol=500)
+lnstrl = matrix(-Inf, nrow=600, ncol=600)
 lnstrl[1, 1] = 0
 
 for (n in 2:dim(lnstrl)[1]) {
@@ -82,6 +82,7 @@ r_pos_seq = matrix(data=0, nrow=N, ncol=numsampling)
 p_pos_seq = matrix(data=0, nrow=N, ncol=numsampling)
 A_pos_seq = matrix(data=0, nrow=N*N, ncol=numsampling)
 bet_pos_seq = matrix(data=0, nrow=N, ncol=numsampling)
+y_pos_seq = matrix(data=0, nrow=T, ncol=numsampling)
 
 for(cntsampling in 1:numsampling) {
   if(cntsampling%%10 == 1) {
@@ -284,6 +285,9 @@ for(cntsampling in 1:numsampling) {
   A_pos_seq[, cntsampling] = c(A)
   bet_pos_seq[, cntsampling] = bet_pos
   
+  ## posterior predictive
+  y_pos_seq[, cntsampling] = rnorm(T, mu_pos[x_pos_seq[, cntsampling]], 1/sqrt(tau_pos[x_pos_seq[, cntsampling]]))
+  
   ## plot
   if(cntsampling%%10 == 1) {
     mu_seq_hat = mu_pos[x_pos_seq[, cntsampling]]
@@ -297,9 +301,19 @@ for(cntsampling in 1:numsampling) {
 ## rhat ##
 # Needs to implement relabeling for label-switching and label birth-death
 
-## Plot
+## Plot (mu)
 mu_seq_hat = sapply(1:T, function(t){mean(mu_pos[x_pos_seq[t, (numsampling-49):numsampling]])})
 mu_seq = datalist$mu[datalist$x]
 
 plot(mu_seq_hat, type="l")
 lines(mu_seq, col="blue", lty="dotted")
+
+## Plot (y)
+y_seq_hat = sapply(1:T, function(t){mean(y_pos_seq[t, (numsampling-49):numsampling])})
+
+plot(y_seq_hat, type="l")
+lines(y, col="blue", lty="dotted")
+
+plot(y_seq_hat - y, type="l")
+
+hist(y_seq_hat - y)
