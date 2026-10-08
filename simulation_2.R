@@ -25,15 +25,23 @@ v = 1
 rmax = 10
 nu = rep(1, rmax)/rmax
 
-## Stirling numbers of the first kind
-strl = matrix(0, nrow=50, ncol=50)
-strl[1, 1] = 1
-for(i in 1:49) {
-  for(j in 1:50) {
-    if(j > 1) {
-      strl[i+1, j] = strl[i, j-1] + i*strl[i, j]
-    } else {
-      strl[i+1, j] = i*strl[i, j]
+## Logarithm of the Stirling numbers of the first kind
+lnstrl = matrix(-Inf,nrow=500, ncol=500)
+lnstrl[1, 1] = 0
+
+for (n in 2:dim(lnstrl)[1]) {
+  log_n_minus_1 = log(n - 1)
+  max_j = min(n, dim(lnstrl)[2])
+    
+  for (k in 1:max_j) {
+    lnQ = c(
+      log_n_minus_1 + lnstrl[n-1, k],
+      if(k > 1) lnstrl[n-1, k-1] else -Inf
+    )
+    
+    lnC <- max(lnQ)
+    if (lnC != -Inf) {
+      lnstrl[n, k] <- lnC + log(sum(exp(lnQ - lnC)))
     }
   }
 }
@@ -237,7 +245,7 @@ for(cntsampling in 1:numsampling) {
         rho = rgeom(length(j), min(1, 1 - A[i, i] + 1e-15)) # to avoid 0 due to underflow
         n_zi[i] = n_zi[i] + sum(rho)
         A[i, ] = rdirichlet(1, alp*bet_pos + n_zi)
-        #n_z[i, i] = n_z[i, i] + n_zi[i] # self-transition counts are used in sampling of beta
+        n_z[i, i] = n_z[i, i] + n_zi[i] # self-transition counts are used in sampling of beta
       }
     } else {
       # redraw from prior
@@ -260,8 +268,9 @@ for(cntsampling in 1:numsampling) {
     for(j in 1:N) {
       if(n_z[i, j] > 0) {
         m_ij = 1:n_z[i, j]
-        p_m = strl[n_z[i, j], m_ij]*(alp*bet_pos[j])^m_ij
-        m_pos[i, j] = sample(m_ij, 1, replace=TRUE, p_m/sum(p_m))
+        lnp_m = lnstrl[n_z[i, j], m_ij] + m_ij*log(alp*bet_pos[j])
+        lnC = max(lnp_m)
+        m_pos[i, j] = sample(m_ij, 1, replace=TRUE, exp(lnp_m - lnC)/sum(exp(lnp_m - lnC)))
       }
     }
   }
