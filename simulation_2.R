@@ -15,7 +15,7 @@ N = 20
 gam = 2
 alp = 3
 
-a = 3
+a = 0.8
 b = 2
 m = 0
 kap = 0.5
@@ -26,7 +26,7 @@ rmax = 10
 nu = rep(1, rmax)/rmax
 
 ## Logarithm of the Stirling numbers of the first kind
-lnstrl = matrix(-Inf,nrow=500, ncol=500)
+lnstrl = matrix(-Inf, nrow=500, ncol=500)
 lnstrl[1, 1] = 0
 
 for (n in 2:dim(lnstrl)[1]) {
@@ -235,17 +235,16 @@ for(cntsampling in 1:numsampling) {
         v_n = v + r_pos[i]*D   # n_s is reduced because duration is interpreted as the number of trials + 1
         p_pos[i] = rbeta(1, u_n, v_n)
       } 
+      
       ## posterior draws of A
-      j = z_pos[which(z_pos == i) + 1]
-      if(length(j) == 1 && is.na(j)) {
+      j = z_pos[which(z_pos[-length(z_pos)] == i) + 1]
+      if(length(j) == 0) {
         A[i, ] = rdirichlet(1, alp*bet_pos) # appeared only in the final state and did no enter into other states
       } else {
         for(l in 1:length(j)) n_z[i, j[l]] = n_z[i, j[l]] + 1
-        n_zi = n_z[i, ]
         rho = rgeom(length(j), min(1, 1 - A[i, i] + 1e-15)) # to avoid 0 due to underflow
-        n_zi[i] = n_zi[i] + sum(rho)
-        A[i, ] = rdirichlet(1, alp*bet_pos + n_zi)
-        n_z[i, i] = n_z[i, i] + n_zi[i] # self-transition counts are used in sampling of beta
+        n_z[i, i] = n_z[i, i] + sum(rho)
+        A[i, ] = rdirichlet(1, alp*bet_pos + n_z[i, ])
       }
     } else {
       # redraw from prior
