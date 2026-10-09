@@ -1,6 +1,7 @@
-### Posterior inference of HDP-HSMM with HMM embedding ###
+### Posterior inference of Recurrent HDP-HSMM with HMM embedding ###
 ## load library ##
 library(MCMCpack)
+library(MASS)
 library(posterior)
 
 ## load data ##
@@ -17,8 +18,8 @@ alp = 3
 
 a = 0.8
 b = 2
-m = 0
-kap = 0.5
+m = c(0, 0)
+Lmd = diag(c(0.5, 0.5))
 
 u = 1
 v = 1
@@ -26,13 +27,13 @@ rmax = 15
 nu = rep(1, rmax)/rmax
 
 ## Logarithm of the Stirling numbers of the first kind
-lnstrl = matrix(-Inf, nrow=600, ncol=600)
+lnstrl = matrix(-Inf, nrow=1000, ncol=1000)
 lnstrl[1, 1] = 0
 
 for (n in 2:dim(lnstrl)[1]) {
   log_n_minus_1 = log(n - 1)
   max_j = min(n, dim(lnstrl)[2])
-    
+  
   for (k in 1:max_j) {
     lnQ = c(
       log_n_minus_1 + lnstrl[n-1, k],
@@ -60,8 +61,8 @@ for(j in 1:N) {
 }
 
 tau_pos = rgamma(N, shape=a, rate=b)
-mu_pos = rnorm(N, mean=m, sd=1/sqrt(kap*tau_pos))
-theta_pos = cbind(mu_pos, 1/sqrt(tau_pos))
+mu_pos = sapply(1:N, function(i){mvrnorm(1, mu=m, Sigma=solve(Lmd*tau_pos[i]))})
+theta_pos = t(rbind(mu_pos, 1/sqrt(tau_pos)))
 
 p_pos = rbeta(N, u, v)
 r_pos = sample(1:rmax, size=N, replace=TRUE, nu)
@@ -70,13 +71,14 @@ r_pos = sample(1:rmax, size=N, replace=TRUE, nu)
 numsampling = 200
 burnin = 100
 
-lnf = function(y, theta) {dnorm(y, mean=theta[1], sd=theta[2], log=TRUE)}
+lnf = function(y, y_, theta) {dnorm(y, mean=y_*theta[1] + theta[2], sd=theta[3], log=TRUE)} # AR(1)
 lng = function(d, r, p){dnbinom(d-1, size=r, prob=1-p, log=TRUE)} # the range of d is 1, 2... so shift it by 1 and match Johnson's parameterization
+y_0 = 1 # define a value for the 0th sequence
 
 z_pos_seq = vector(mode="list", length=numsampling)
 d_pos_seq = vector(mode="list", length=numsampling)
 x_pos_seq = matrix(0, nrow=T, ncol=numsampling)
-mu_pos_seq = matrix(data=0, nrow=N, ncol=numsampling)
+mu_pos_seq = matrix(data=0, nrow=N*2, ncol=numsampling)
 tau_pos_seq = matrix(data=0, nrow=N, ncol=numsampling)
 r_pos_seq = matrix(data=0, nrow=N, ncol=numsampling)
 p_pos_seq = matrix(data=0, nrow=N, ncol=numsampling)
@@ -88,7 +90,7 @@ for(cntsampling in 1:numsampling) {
   if(cntsampling%%10 == 1) {
     cat(sprintf("%s - Number of sampling: %d/%d\n", Sys.time(), cntsampling, numsampling))
   }
-
+  
   ## embedded HMM message passing ##
   lnB = matrix(0, nrow=T, ncol=N)
   lnBlik = matrix(0, nrow=T, ncol=N)
@@ -102,7 +104,7 @@ for(cntsampling in 1:numsampling) {
     for(i in 1:N) {
       lnQ = lnc[[i]] + lnBbar[[i]][t+1, ]
       lnC = max(lnQ)
-      lnBlik[t, i] = lnf(y[t+1], theta_pos[i, ]) + (lnC + log(sum(exp(lnQ - lnC))))
+      lnBlik[t, i] = lnf(y[t+1], y[t], theta_pos[i, ]) + (lnC + log(sum(exp(lnQ - lnC))))
     }
     
     for(i in 1:N) {
@@ -112,7 +114,7 @@ for(cntsampling in 1:numsampling) {
     }
     
     for(i in 1:N) {
-      lnf_i = lnf(y[t+1], theta_pos[i, ])
+      lnf_i = lnf(y[t+1], y[t], theta_pos[i, ])
       
       lnQ = c(
         lnp_pos[i] + lnf_i + lnBbar[[i]][t+1, r_pos[i]],
@@ -136,9 +138,9 @@ for(cntsampling in 1:numsampling) {
   for(i in 1:N) {
     lnQ = lnc[[i]] + lnBbar[[i]][t+1, ]
     lnC = max(lnQ)
-    lnBlik_0[i] = lnf(y[t+1], theta_pos[i, ]) + (lnC + log(sum(exp(lnQ - lnC))))
+    lnBlik_0[i] = lnf(y[t+1], y_0, theta_pos[i, ]) + (lnC + log(sum(exp(lnQ - lnC))))
   }
-
+  
   ## sampling z and d
   z_pos = c()
   d_pos = c()
@@ -146,7 +148,7 @@ for(cntsampling in 1:numsampling) {
   s = 1
   t = 1
   lnAini = log(bet_pos)
-
+  
   while(t <= T) {
     ## sampling z
     if(s == 1) {
@@ -161,15 +163,27 @@ for(cntsampling in 1:numsampling) {
     ## sampling d
     lnp_d_pos = vector(mode="numeric", length=T-t+1)
     for(d in 1:(T-t+1)) {
+      if(t == 1) {
+        lnf_d = sum(lnf(y[t:(t+d-1)], c(y_0, y[(t-1):(t+d-2)]), theta_pos[z_pos[s], ]))
+      } else {
+        lnf_d = sum(lnf(y[t:(t+d-1)], y[(t-1):(t+d-2)], theta_pos[z_pos[s], ]))
+      }
+      
       lnp_d_pos[d] = 
         lng(d, r_pos[z_pos[s]], p_pos[z_pos[s]]) + 
-        sum(lnf(y[t:(t+d-1)], theta_pos[z_pos[s], ])) + 
+        lnf_d + 
         lnB[t+d-1, z_pos[s]]
+    }
+    
+    if(t == 1) {
+      lnf_d = sum(lnf(y[t:T], c(y_0, y[(t-1):(T-1)]), theta_pos[z_pos[s], ]))
+    } else {
+      lnf_d = sum(lnf(y[t:T], y[(t-1):(T-1)], theta_pos[z_pos[s], ]))
     }
     
     lnp_d_cens_pos = 
       pnbinom(T-t-1, size=r_pos[z_pos[s]], prob=1-p_pos[z_pos[s]], lower.tail=FALSE, log.p=TRUE) +
-      sum(lnf(y[t:T], theta_pos[z_pos[s], ]))  # recall B(T > t) = 1 
+        lnf_d # recall B(T > t) = 1 
     
     lnQ = c(lnp_d_pos, lnp_d_cens_pos)
     lnC = max(lnQ)
@@ -199,18 +213,32 @@ for(cntsampling in 1:numsampling) {
   for(i in 1:N) {
     if(i %in% z_pos_set) {
       ## posterior draws of mu and sgm
-      n = sum(x_pos_seq[, cntsampling] == i)
-      y_i = y[x_pos_seq[, cntsampling] == i]
-      y_bar = mean(y_i)
+      idx_i = which(x_pos_seq[, cntsampling] == i)
+      n = length(idx_i)
+      y_it = y[idx_i]
+        
+      if(1 %in% idx_i) {
+        y_it_ = c(y_0, y[idx_i - 1])
+      } else {
+        y_it_ = y[idx_i - 1]
+      }
       
-      m_n = ((kap*m) + n*y_bar)/(kap + n)
-      kap_n = kap + n
+      S_x = sum(y_it_)
+      S_y = sum(y_it)
+      S_xx = sum(y_it_^2)
+      S_yy = sum(y_it^2)
+      S_xy = sum(y_it_*y_it)
+      XX = matrix(data=c(S_xx, S_x, S_x, n), nrow=2, ncol=2)
+      Xy = c(S_xy, S_y)
+      
+      Lmd_n = Lmd + XX
+      m_n = solve(Lmd_n)%*%(Lmd%*%m + Xy)
       a_n = a + n/2
-      b_n = b + 0.5*sum((y_i - y_bar)^2) + (kap*n*(y_bar - m)^2)/(2*(kap + n))
+      b_n = b + 0.5*(S_yy + t(m)%*%Lmd%*%m - t(m_n)%*%Lmd_n%*%m_n)
       
       tau_pos[i] = rgamma(1, shape=a_n, rate=b_n)
-      mu_pos[i] = rnorm(1, m_n, 1/sqrt(kap_n*tau_pos[i]))
-      theta_pos[i, ] = c(mu_pos[i], 1/sqrt(tau_pos[i]))
+      mu_pos[, i] = mvrnorm(1, mu=m_n, Sigma=solve(Lmd_n*tau_pos[i]))
+      theta_pos[i, ] = c(mu_pos[, i], 1/sqrt(tau_pos[i]))
       
       ## posterior draws of r and p
       idx_i = z_pos ==i & (!d_cens) # duration of censoring term is not identifiable so remove it
@@ -250,8 +278,8 @@ for(cntsampling in 1:numsampling) {
     } else {
       # redraw from prior
       tau_pos[i] = rgamma(1, shape=a, rate=b)
-      mu_pos[i] = rnorm(1, m, 1/sqrt(kap*tau_pos[i]))
-      theta_pos[i, ] = c(mu_pos[i], 1/sqrt(tau_pos[i]))
+      mu_pos[, i] = mvrnorm(1, mu=m, Sigma=solve(Lmd*tau_pos[i]))
+      theta_pos[i, ] = c(mu_pos[, i], 1/sqrt(tau_pos[i]))
       r_pos[i] = sample(1:rmax, size=1, replace=TRUE, nu)
       p_pos[i] = rbeta(1, u, v)
       A[i, ] = rdirichlet(1, alp*bet_pos)
@@ -278,37 +306,43 @@ for(cntsampling in 1:numsampling) {
   bet_pos = rdirichlet(1, gam/N + colSums(m_pos))
   
   ## record samples
-  mu_pos_seq[, cntsampling] = mu_pos
+  mu_pos_seq[, cntsampling] = c(mu_pos)
   tau_pos_seq[, cntsampling] = tau_pos
   r_pos_seq[, cntsampling] = r_pos
   p_pos_seq[, cntsampling] = p_pos
   A_pos_seq[, cntsampling] = c(A)
   bet_pos_seq[, cntsampling] = bet_pos
   
-  ## posterior predictive
-  y_pos_seq[, cntsampling] = rnorm(T, mu_pos[x_pos_seq[, cntsampling]], 1/sqrt(tau_pos[x_pos_seq[, cntsampling]]))
-  
   ## plot
   if(cntsampling%%10 == 1) {
-    mu_seq_hat = mu_pos[x_pos_seq[, cntsampling]]
-    mu_seq = datalist$mu[datalist$x]
+    mu_pos_w_1 = mu_pos[1, x_pos_seq[, cntsampling]]
+    mu_pos_w_2 = mu_pos[2, x_pos_seq[, cntsampling]]
+    sgm_pos_w = 1/sqrt(tau_pos[x_pos_seq[, cntsampling]])
+    y_pos_seq[1, cntsampling] = rnorm(1, y_0*mu_pos_w_1[1] + mu_pos_w_2[1], sgm_pos_w[1])
+    for(t in 2:T)  y_pos_seq[t, cntsampling] = rnorm(1, y_pos_seq[t-1, cntsampling]*mu_pos_w_1[t] + mu_pos_w_2[t], sgm_pos_w[t])
     
-    plot(mu_seq_hat, type="l")
-    lines(mu_seq, col="blue", lty="dotted")
+    plot(y_pos_seq[, cntsampling], type="l")
+    lines(y, col="blue", lty="dotted")
   }
 }
 
 ## rhat ##
 # Needs to implement relabeling for label-switching and label birth-death
 
-## Plot (mu)
-mu_seq_hat = sapply(1:T, function(t){mean(sapply((burnin+1):numsampling, function(w){mu_pos_seq[x_pos_seq[t, w], w]}))})
-mu_seq = datalist$mu[datalist$x]
-
-plot(mu_seq_hat, type="l")
-lines(mu_seq, col="blue", lty="dotted")
-
 ## Plot (y)
+for(w in (burnin+1):numsampling) {
+  idx_i = x_pos_seq[, w]
+  mu_pos_w = mu_pos_seq[, w]
+  mu_pos_w_1 = mu_pos_w[seq(from=1, to=N*2, by=2)]
+  mu_pos_w_2 = mu_pos_w[seq(from=2, to=N*2, by=2)]
+  mu_pos_w_1 = mu_pos_w_1[idx_i]
+  mu_pos_w_2 = mu_pos_w_2[idx_i]
+  sgm_pos_w = 1/sqrt(tau_pos_seq[idx_i, w])
+  
+  y_pos_seq[1, w] = rnorm(1, y_0*mu_pos_w_1[1] + mu_pos_w_2[1], sgm_pos_w[1])
+  
+  for(t in 2:T)  y_pos_seq[t, w] = rnorm(1, y_pos_seq[t-1, w]*mu_pos_w_1[t] + mu_pos_w_2[t], sgm_pos_w[t])
+}
 y_seq_hat = sapply(1:T, function(t){mean(y_pos_seq[t, (burnin+1):numsampling])})
 
 plot(y_seq_hat, type="l")
